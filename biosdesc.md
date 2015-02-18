@@ -164,7 +164,7 @@ Sources:
 |0xFFF53|Dummy Interrupt Handler|
 |0xFFF54|INT 05 Entry Point|
 |0xFFFF0|Power-On Entry Point|
-|0xFFFF5|“MM/DD/YY”|
+|0xFFFF5|b MM/DD/YYb |
 |0xFFFFE|System Model 0xFC|
 
 Sometimes the Interrupt Vectors can also be found after the Dummy Interrupt Handler, but this is not universal (for example, the COMPAQ Portable BIOS does not do this).
