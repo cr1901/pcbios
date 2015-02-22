@@ -15,7 +15,7 @@ TLDR: With few modifications, the BIOS described in this document should be dire
 
 #IBM PC Hardware Brief
 ##Onboard Hardware
-IBM PC-compatibles, up to XT-clones consist of the following hardware that is exposed to the programmer, in (rough) order of increasing complexity. Base Port I/O addresses are listed in parentheses:
+IBM PC-compatibles, up to XT-clones consist of the following hardware that is exposed to the programmer, in (rough) order of increasing complexity. In general, the datasheets along with the provided Base Port I/O addresses are sufficient for understanding how the PC's components (onboard *and* external) interact with each other. Topics which are not provided in official datasheets and/or require examining circuit schematics are discussed in subsequent sections. Base Port I/O addresses are listed in parentheses:
 * NMI Gate (0xA0)
 * Sense Switches (0x60-0x62) (Two sets on PC and PC-clones only)
 * RAM Parity Check Gate (0x61-0x62)
@@ -30,6 +30,21 @@ IBM PC-compatibles, up to XT-clones consist of the following hardware that is ex
 * 8087 Floating Point Coprocessor
 
 On PC-class and XT-class machines, other hardware, including a 8284 Clock Generator and 8288 Bus Controller, exist on the mainboard, but are not exposed to the programmer.
+
+###CPU
+To expand later.
+
+The IBM PC CPU is an Intel 8088 processor running in maximum mode. Consequently, the 8259 PIC (multiplexes interrupt sources for the single INT input) and 8237 DMAC are supported. The sources for NMI include parity error, handled using TTL glue logic and a TTL parity generator, and I/O channel check from the ISA bus. The address and data buses are buffered using TTL chips.
+
+###DMA Page Registers
+The 8237 DMA Controller only has enough address lines for a 64kB system. The DMA page registers provide the remaining 4 address bits in an IBM PC system, one for each channel except channel 0. DMA channel 0 handles DRAM Refresh by assertion of 8253 PIT's channel 1 output (see BIOS description for more detail). Consequently, mem-to-mem xfers are not useful. The page register itself is a TTL 4x4 register file.
+
+|Port|Function|
+|-----|:-----|
+|0x80|Extra storage (Diagnostic Output for POST cards)|
+|0x81|DMA channel 2 A16-19|
+|0x82|DMA channel 3 A16-19|
+|0x83|DMA channel 1 A16-19|
 
 ###PPI Ports
 Many hardware functions that require only one or two data/control lines are exposed via the PPI. PPI Ports A and C are inputs while B is an output. The following lists a table of I/O from the PPI- copied/modified in presentation from IBM 5150 Technical Reference Manual. Note: **For sense switches, OFF is seen as 1, ON is seen as 0 from the CPU's point-of-view! All references to sense switches are from CPU's POV.**
@@ -71,14 +86,14 @@ Notes:
 Some PC control logic can be prevented from reaching its destination by asserting a wire which feeds into a logic gate (AND/OR) shared with the control logic. Asserting this wire inhibits the value of the other (control) data line from reaching the output out the logic gate by keeping the gate's output de-asserted. At least five gates are provided that the programmer can maniplulate:
 * NMI gate: Prevent NMIs from reaching the CPU completely.
 * PIT provides gates for each channel. Only channel 2's gate is accesible to the programmer via PPI.
-* Speaker data gate can silence the speaker, regardless of PIT channel 2 output.
+* Speaker data gate can silence the speaker, regardless of PIT channel 2 output and gate.
 * I/O channel check: Prevent expansion card errors from reaching the PPI Port C or NMI pin on the CPU.
 * Parity check: Prevent parity errors from reaching the PPI Port C or NMI pin on the CPU.
 
 ###Sense Switches
 For the first set of sense switches, near the center of the board, SW1-8 correspond to PA0-7. For the second set of sense switches, near the power supply, SW1-4 correspond to PC0-3. PC0 also reads SW5 of the second set of sense switches, when PB2 is deasserted. The relevant functions are documented in the PPI ports table.
 
-Total system memory installed in kB, as set by the sense switches, is determined by the following formula: 
+Total system memory installed in kB, as set by the sense switches, is determined by the following formula (reminder that assertion of switches is OFF position): 
 ```
 Mem in kb = (SW2-5)*512 + (SW2-1 to SW2-4)*32 + (SW1-3 to SW1-4)*16
 ``` 
@@ -90,6 +105,7 @@ Expansion cards are likely to provide the following hardware (*that BIOS is like
 * MM58167 RTC (0x240, 0x300, 0x340- Found by trial and error)
 * TTL Glue logic for Color and Mono adapter configuration (0x3D4-0x3DF Color, 0x3B4-0x3BF Mono)
 * TTL Glue logic for Line Printer Terminal (LPT) (0x3BC, 0x378, 0x278, ?)
+* TTL Glue logic for Game Control Adapter (0x201)
 * 16550 UART for Serial Communications (COM) (0x3F8, 0x2F8, 0x3E8, 0x238)
 * 765 Floppy Disk Controller (0x3F2 Glue logic, 0x3F4-0x3F5 Controller)
 * VGA VLSI chip (BIOS is provided by controller- PC BIOS simply needs to jump to setup routine)
@@ -99,6 +115,25 @@ Expansion cards are likely to provide the following hardware (*that BIOS is like
 Most hardware is exposed through x86 port-mapped I/O ports. Memory-mapped I/O is reserved for BIOS ROM chips, extra memory and the frame buffer.
 
 The minimum external hardware configuration so that the BIOS doesn't complain (at least IBM's) appears to be Floppy and Video Card.
+
+The following sections describe programming and hardware considerations for expansion cards. The topics discussed here all have circuit schematics, from which most of this information is derived. Most of these expansion cards use TTL latches/registers to implement I/O ports, which feed into/out of other parts of the expansion card circuitry. These latches can (and do) affect operation of other main control logic components, such as the CRT Controller's input clock speed being determined by the CGA mode control register. These are interactions between hardware components (beyond address decoding) that cannot necessarily be inferred *just* from the datasheets for the relevant hardware and TTL chips.
+###MDA Card
+To be written. Use the CRT parmeters and schematic given in [this document][MDA].
+[MDA]: http://www.minuszerodegrees.net/oa/OA%20-%20IBM%20Monochrome%20Display%20and%20Printer%20Adapter.pdf
+
+###CGA Card
+To be written. Use the CRT parmeters and schematic given in [this document][CGA].
+[CGA]: http://www.minuszerodegrees.net/oa/OA%20-%20IBM%20Color%20Graphics%20Monitor%20Adapter%20(CGA).pdf
+
+###Floppy Controller
+To be written. The FDC is arguably the most difficult part of the IBM PC to understand, as it requires knowledge about how data is stored on a floppy drive, as well as workarounds required (clock recovery via PLL) due to physical limitations of floppy media (data density) of sampling data (bit slip). The actual format of floppy data doesn't help matters either. See [MFM](http://en.wikipedia.org/wiki/Modified_Frequency_Modulation), and [here](https://archive.org/details/bitsavers_necdatashe79_1461697). Commit information on the A1 sync mark to memory :). It keeps throwing me off.
+
+##LPT
+To be written. See [this document][MDA] for schematic.
+
+###Game Port
+To be written. See [this document][GP] for schematic.
+[GP]: http://www.minuszerodegrees.net/oa/OA%20-%20IBM%20Game%20Control%20Adapter.pdf
 
 ##Software Workarounds and Incompatibilities
 TODO: Find a better name for this section! Discuss clone timings and incompatibilities.
@@ -134,7 +169,7 @@ Accoding to IBM 5150 Technical Reference Manual:
 * Bootstrap
 * IO Support
 * System Configuration Analysis
-* Casette (Not documented here, as Int 0x15 in clones is used for auxilary support routines)
+* Casette (Not documented here- I have no way to test a casette, and Int 0x15 in clones is used for auxilary support routines)
 * Graphics Mode Character ROM
 * Time Of Day
 * Print Screen
@@ -151,7 +186,7 @@ TODO: Add other locations, and mark where each location was introduced and from 
 The BIOS uses 256 bytes from linear address 0x00400 to 0x004FF to store its parameters and data. The following locations are used in the IBM PC 5150 BIOS as described by the IBM 5150 Technical Reference Manual.
 
 ###Equipment Word
-
+To be written.
 
 ##Entry Point Table
 IBM BIOSes, including clones, tend to reserve specific addresses as entry points into its interrupt service routines. The following is a list of such entry points that should be kept for compatibility with software which jumps directly into BIOS. This includes certain Option ROMs and early-PC software which thought it was a good idea to bypass the ```INT``` instruction to save a few cycles.
@@ -190,6 +225,9 @@ Sources:
 |0xFFFFE|System Model 0xFC|
 
 Sometimes the Interrupt Vectors can also be found after the Dummy Interrupt Handler, but this is not universal (for example, the COMPAQ Portable BIOS does not do this).
+
+##BIOS Video Modes
+To be written.
 
 #5150 BIOS Verbal Description
 ##Bootstrap
@@ -323,7 +361,7 @@ This subroutine is actually placed before the BIOS Entry Point but after banner.
 * Zero out this RAM. Ensure reset flag in Data Area is preserved. This does not work quite as intended on 64k/256k boards due to assuming 16kB RAM chips. IBM says that these switches should both be off on 64k/256k boards.
 
 
-GFX Tables are stored in the following order:
+6845 CRT Controller parameters are stored in the following order:
 * 40x25 CGA
 * 80x25 CGA
 * Graphics CGA
