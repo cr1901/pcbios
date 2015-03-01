@@ -31,10 +31,18 @@ IBM PC-compatibles, up to XT-clones consist of the following hardware that is ex
 
 On PC-class and XT-class machines, other hardware, including a 8284 Clock Generator and 8288 Bus Controller, exist on the mainboard, but are not exposed to the programmer.
 
-###CPU
+###8088 CPU
 To expand later.
 
 The IBM PC CPU is an Intel 8088 processor running in maximum mode. Consequently, the 8259 PIC (multiplexes interrupt sources for the single INT input) and 8237 DMAC are supported. The sources for NMI include parity error, handled using TTL glue logic and a TTL parity generator, and I/O channel check from the ISA bus. The address and data buses are buffered using TTL chips.
+
+###8237 DMA Controller
+When the IBM PC was designed, requests for DMA were exposed to expansion cards via pins on the ISA bus. The designers decided that hardware should make requests for DMA using an active high signal, and that the DMA controller should acknowledge DMA requests using an active low signal. Normal (uncompressed) timing is used, and mem-to-mem is disabled.
+
+###8253 PIT
+Channel 0 of the PIT attaches to the highest-priority interrupt- IR0- of the PIC. A square wave is emitted from channel 0, though a pulse should work just as well in practice (PIC is edge-triggered).
+Channel 1 feeds into an inverter, which in turn feeds into DREQ0 of the DMAC. A pulse is emitted from channel 1 (PIT mode 2).
+Channel 2 attaches to the speaker gate, and emits a square wave.
 
 ###DMA Page Registers
 The 8237 DMA Controller only has enough address lines for a 64kB system. The DMA page registers provide the remaining 4 address bits in an IBM PC system, one for each channel except channel 0. DMA channel 0 handles DRAM Refresh by assertion of 8253 PIT's channel 1 output (see BIOS description for more detail). Consequently, mem-to-mem xfers are not useful. The page register itself is a TTL 4x4 register file.
@@ -98,6 +106,20 @@ Total system memory installed in kB, as set by the sense switches, is determined
 Mem in kb = (SW2-5)*512 + (SW2-1 to SW2-4)*32 + (SW1-3 to SW1-4)*16
 ``` 
 Because BIOS checks mainboard RAM first, SW1-3 and SW1-4 should be asserted (set to OFF position) before any of SW2-1 to SW2-5 are asserted. 
+
+###Keyboard
+Page 4-4 of the 1984 Technical Reference Manual contains an error. PCLK (14MHz or so) should *not* be connected to the keyboard clock. The keyboard clock should be connected to the input of LS175. PCLK presumably just adds a delay relative to the keyboard data line when being clocked into a shift register.
+
+If I had a desktop computer, I'd likely be using a modern clone of the Model F keyboard with USB- or even a real one that converts scancodes to AT/PS/2 protocol! I already [built a converter before](http://www.vintage-computer.com/vcforum/showthread.php?15907-AT-to-XT-Keyboard-Converter&p=306127#post306127). Sadly, since doing this project, I lost most of my information.
+
+IMHO, what actually happens in the XT keyboard protocol, although simple, is not extensively documented, compared to the more-complx AT protocol. An XT protocol decoder can be built with 3 TTL chips: 
+* 74LS322 shift register for the data itself 
+* 74LS74 that controls when to trigger interrupts and inhibit shift register input
+* 74LS07 for buffering data lines which can control the open-collector keyboard clock and data
+
+The keyboard clocks in a data byte byte by first pulling its clock line low and data line high. Both lines open-collector, meaning either side can pull the line from high to low to say "I need to tell you something". The keyboard then releases the clock high, which causes the shift register to accept the input high data. The next 8 bits, which can be a combination of 0 and 1, are clocked in on the rising edge in the same manner. After the last bit is clocked, the PC pulls the data line low and triggers an interrupt (IRQ 1).
+
+To be continued.
 
 ##Expansion Card Hardware
 Expansion cards are likely to provide the following hardware (*that BIOS is likely to initialize if found*) as well:
@@ -186,7 +208,20 @@ TODO: Add other locations, and mark where each location was introduced and from 
 The BIOS uses 256 bytes from linear address 0x00400 to 0x004FF to store its parameters and data. The following locations are used in the IBM PC 5150 BIOS as described by the IBM 5150 Technical Reference Manual.
 
 ###Equipment Word
-To be written.
+The Equipment Word consists of two bytes at 0x40:0x10. According to "System BIOS for IBM PC/XT/AT Computers and Compatibles", it consists of the following fields:
+
+|Bits|Function|
+|----|:--------|
+|15-14| Number of LPT ports|
+|13-12| Reserved|
+|11-9| Number of COM ports|
+|8| Reserved|
+|7-6| Numbr of disk drives|
+|5-4| Other (0)/40x25 CGA (1)/80x25 CGA (2)/Monochrome (3) video mode|
+|3| Reserved|
+|2| Pointing device|
+|1| Coprocessor installed|
+|0| Diskette boot enabled|
 
 ##Entry Point Table
 IBM BIOSes, including clones, tend to reserve specific addresses as entry points into its interrupt service routines. The following is a list of such entry points that should be kept for compatibility with software which jumps directly into BIOS. This includes certain Option ROMs and early-PC software which thought it was a good idea to bypass the ```INT``` instruction to save a few cycles.
