@@ -37,6 +37,6 @@ bios_obj = base_env.Object('src/bios', 'src/main.asm')
 bios_bin = base_env.Finalize('src/bios')
 
 
-base_env.Clean(bios_obj, ['src/bios.lst', 'src/bios.bin', \
+base_env.Clean(bios_obj, ['src/bios.lst', 'src/bios.map', 'src/bios.bin', \
 	'src/bios.ith', 'src/bios.srec'])
 

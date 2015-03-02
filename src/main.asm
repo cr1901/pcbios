@@ -1,3 +1,5 @@
+[map all src/bios.map]
+
 ;General BIOS macros
 %macro post_err 1
 	mov al, %1
@@ -29,10 +31,19 @@
 	%endrep
 %endmacro
 
-%macro int_table 2
-	jump_table int %+ %1, sub, %2	
-%endmacro
+;%macro int_table 2
+;	jump_table int %+ %1, sub, %2	
+;%endmacro
 
+;Define flags easily
+%macro defflags 1-*.nolist
+	%assign count 0
+	%rep %0
+		%xdefine %1 bit(count)
+		%assign count count + 1
+		%rotate 1
+	%endrep
+%endmacro
 
 ;General defines
 %define crlf 0x0D, 0x0A
@@ -101,7 +112,7 @@ struc PPI_8255
 .portc resb 1 ;Mem switches/mainboard status
 .ctrl resb 1
 endstruc
-%define PPI(_x) PPI_base + PIT_8255. %+ _x
+%define PPI(_x) PPI_base + PPI_8255. %+ _x
 
 %define PAGE_base 0x80
 struc PAGE_regs
@@ -114,25 +125,28 @@ endstruc
 
 %define NMI_gate 0xA0
 
-;External hardware (including expansion cards)
-%define COM1_base 0x3F8
-%define COM2_base 0x2F8
-%define COM3_base 0x3E8
-%define COM4_base 0x2E8
-;struc COM_8250
-;endstruc
-
-
 %define MDA_base 0x3B4
 struc MDA_reg
 .idx6845 resb 1
 .data6845 resb 1
 resb 2
-.ctrl resb 1
+.modectl resb 1
 resb 1
 .status resb 1
 endstruc
 %define MDA(_x) MDA_base + MDA_reg. %+ _x
+
+%define LPT1_base 0x3BC
+%define LPT2_base 0x378
+%define LPT3_base 0x278
+struc LPT_reg
+.data resb 1
+.status resb 1
+.ctrl resb 1
+endstruc
+%define LPT1(_x) LPT1_base + LPT_reg. %+ _x
+%define LPT2(_x) LPT2_base + LPT_reg. %+ _x
+%define LPT3(_x) LPT3_base + LPT_reg. %+ _x
 
 %define CGA_base 0x3D4
 struc CGA_reg
@@ -167,18 +181,40 @@ struc CRTC_6845
 endstruc
 %define CRTC(_x) CRTC_6845. %+ _x
 
-%define LPT1_base 0x3BC
-%define LPT2_base 0x378
-%define LPT3_base 0x278
-struc LPT_reg
-.data resb 1
+;Todo: Only status and data are part of the 765 proper. Split into it's own
+;struc for consistency, despite the programming model being nothing like
+;the 6845?
+%define FDC_base 0x3F2
+struc FDC_765
+.doutput resb 1
+resb 1
 .status resb 1
-.ctrl resb 1
+.data resb 1
 endstruc
-%define LPT1(_x) LPT1_base + LPT_reg. %+ _x
-%define LPT2(_x) LPT2_base + LPT_reg. %+ _x
-%define LPT3(_x) LPT3_base + LPT_reg. %+ _x
+%define FDC(_x) FDC_base + FDC_765. %+ _x
 
+;External hardware (including expansion cards)
+%define COM1_base 0x3F8
+%define COM2_base 0x2F8
+%define COM3_base 0x3E8
+%define COM4_base 0x2E8
+struc COM_8250
+.txbuff resb 0
+.rxbuff resb 0
+.divl resb 1
+.inten resb 0
+.divh resb 1
+.intid resb 1
+.linectrl resb 1
+.modctrl resb 1
+.linestat resb 1
+.modstat resb 1
+.scratch resb 1
+endstruc
+%define COM1(_x) COM1_base + COM_8250. %+ _x
+%define COM2(_x) COM2_base + COM_8250. %+ _x
+%define COM3(_x) COM3_base + COM_8250. %+ _x
+%define COM4(_x) COM4_base + COM_8250. %+ _x
 
 ;BDA defintions
 struc bios_data_area
@@ -191,9 +227,65 @@ struc bios_data_area
 .lpt3addr resw 1
 .lpt4addr resw 1
 .equipword resw 1
-
+.mfgtest resb 1
+.memsize resw 1
+.iomemsize resw 1
+;KB params
+.kbstatus resw 1 ;Accessed as two bytes in 5150 BIOS
+.altkeybuf resb 1
+.buffhead resw 1
+.bufftail resw 1
+.kbbuff resw 16
+.kbbuff_end resb 0
+;Floppy disk params
+.seekstatus resb 1
+.motorstatus resb 1
+.motorcount resb 1
+.diskstatus resb 1 ;FDC Card status (TTL latch + glue logic)
+.fdcstatus resb 7 ;NEC Controller Status
+;Video params
+.crtmode resb 1
+.crtcols resw 1
+.crtbufsiz resw 1 ;Size of video buffer
+.crtstart resw 1 ;Offset into buffer where data starts
+.curspos resw 8
+.cursmode resw 1
+.activepage resb 1
+.crtcaddr resw 1
+.crtmodereg resb 1 ;3x8 mirror
+.crtpalette resb 1 ;Color card
+;Cassette Params
+.edgecnt resw 1
+.crcreg resw 1
+.lastinput resb 1
+;Timer params
+.timercnt resd 1 ;Accessed as two words in 5150 BIOS
+.dayelapsed resb 1
+;System params
+.breakflag resb 1
+.resetflag resw 1
+;Fixed disk data area
+resw 2
+;Timeouts
+.lpt1timeout resb 1
+.lpt2timeout resb 1
+.lpt3timeout resb 1
+.lpt4timeout resb 1
+.com1timeout resb 1
+.com2timeout resb 1
+.com3timeout resb 1
+.com4timeout resb 1
+;Extra keyboard data
+.kbbuffstart resw 1 ;The start of the ring buffer itself, not the current head.
+.kbbuffend resw 1 ;End of the ring buffer, not the current tail.
 endstruc
 %define BDA(_x) bios_data_area. %+ _x
+
+;At segment 0x50 = linear 0x00500
+struc extra_data_area
+.status resb 1
+endstruc
+%define XDA(_x) extra_data_area. %+ _x
 
 ;Equipment word format (according to Phoenix BIOS book):
 ;15-14- Number of LPT ports
@@ -216,41 +308,25 @@ endstruc
 %define ibm_compat_offset 0xFE000 ;The original BIOS started here
 
 ;Essentially, pad until the entry point is reached. Will error out if exceeded.
-%macro ibm_entry 1
+%macro ibm_entry 2
 	times %1-($-$$)-ibm_compat_offset db 0xFF
+%2:
 %endmacro
 
-%define post_entry     ibm_entry 0xFE05B ;POST Entry Point
-%define NMI_entry      ibm_entry 0xFE2C3 ;NMI Entry Point
-%define HDDparam_entry ibm_entry 0xFE401 ;HDD Parameter Table
-%define int19h_entry   ibm_entry 0xFE6F2 ;INT 19 Entry Point
-%define cfgdata_entry  ibm_entry 0xFE6F5 ;Configuration Data Table
-%define baud_entry     ibm_entry 0xFE729 ;Baud Rate Generator Table
-%define int14h_entry   ibm_entry 0xFE739 ;INT 14 Entry Point
-%define int16h_entry   ibm_entry 0xFE82E ;INT 16 Entry Point
-%define int09h_entry   ibm_entry 0xFE987 ;INT 09 Entry Point
-%define int13h_entry   ibm_entry 0xFEC59 ;INT 13 Floppy Entry Point
-%define int0eh_entry   ibm_entry 0xFEF57 ;INT 0E Entry Point
-%define FDCparam_entry ibm_entry 0xFEFC7 ;Floppy Disk Controller Parameter Table
-%define int17h_entry   ibm_entry 0xFEFD2 ;INT 17
-%define int10h_entry   ibm_entry 0xFF065 ;INT Video
-%define int1dh_entry   ibm_entry 0xFF0A4 ;MDA and CGA Video Parameter Table INT 1D
-%define int12h_entry   ibm_entry 0xFF841 ;INT 12 Entry Point
-%define int11h_entry   ibm_entry 0xFF84D ;INT 11 Entry Point
-%define int15h_entry   ibm_entry 0xFF859 ;INT 15 Entry Point
-%define gfxchar_entry  ibm_entry 0xFFA6E ;Low 128 character of graphic video font
-%define int1ah_entry   ibm_entry 0xFFE6E ;INT 1A Entry Point
-%define int08h_entry   ibm_entry 0xFFEA5 ;INT 08 Entry Point
-%define dummyint_entry ibm_entry 0xFFF53 ;Dummy Interrupt Handler
-%define int05h_entry   ibm_entry 0xFFF54 ;INT 05 Print Screen Entry Point
-%define reset_entry    ibm_entry 0xFFFF0 ;Power-On Entry Point
-%define ROMdate_entry  ibm_entry 0xFFFF5 ;ROM Date in ASCII “MM/DD/YY” for 8 characters
-%define sysmodel_entry ibm_entry 0xFFFFE ;System Model 0xFC 
-
+%define fixed_entry(_x, _y) ibm_entry _x, _y %+ _entry
+ 
 ;Just place the table of interrupt vectors somewhere in the code.
-;%macro int_table 0
-
-;%endmacro
+%macro define_int_table 0
+int_table:
+	dw dummyint_entry, dummyint_entry, NMI_entry, dummyint_entry ;0
+	dw dummyint_entry, int05h_entry, dummyint_entry, dummyint_entry ;4
+	dw int08h_entry, int09h_entry, dummyeoi_entry, dummyeoi_entry ;8
+	dw dummyeoi_entry, dummyeoi_entry, int0eh_entry, dummyeoi_entry ;C
+	dw int10h_entry, int11h_entry, int12h_entry, int13h_entry ;10
+	dw int14h_entry, int15h_entry, int16h_entry, int17h_entry ;14
+	dw dummyint_entry, int19h_entry, int1ah_entry, dummyint_entry ;18
+	dw dummyint_entry, int1dh_entry, dummyint_entry, dummyint_entry ;1C
+%endmacro
 
 ;BIOS code begins here
 section .text ;Not necessary, but this is where the real code starts
@@ -260,7 +336,7 @@ org ibm_compat_offset ;Where the assembler thinks the code starts relative to CP
 banner:	db '5150-class IBM PC BIOS', crlf
 	db '(c) 2013-15 William D. Jones', crlf, 0x00
 
-post_entry
+fixed_entry(0xFE05B, post)     ;POST Entry Point
 ;Will need to think this one through.
 ;Simple CMP won't work b/c unused flag positions are undefined.
 ;fl_chk:
@@ -391,14 +467,47 @@ set_stack:
 	xor ax, ax
 	mov ss, ax
 	mov sp, 0x400 ;0x300-0x3FF becomes stack- SP points to "last used".
+
+;Before video init, check what the sense switches behind the PPI have to say,
+;about attached video.
+ppi_init:
+	mov al, 0x99
+	out PPI(ctrl), al ;Port A/C Input. Port B Output. 
+	;Mode 0 (no handshaking) for all I/O pins.	
 	
+vid_init:	
 	;If CGA/MDA 6845 CRTCs exist, initialize them now using the tables
 	;provided by INT 0x1D and the switch settings.
+	;in al, PPI(portb)
+	;mov bl, al ;Save a copy
+	;or al, 0x80 ;Enable sense switches
+	;out PPI(portb), al
+	;delay
+	;in al, PPI(porta)
+	;and al, 30 ;Get the video switches
+	
+.test_exist_CGA:
+
+.test_exist_MDA:
+	;mov al, bl
+	;out PPI(portb), al ;Restore the old value of the PPI ctrl port
+	
+	;mov bl, 
+	
+	;Even if we found CGA/MDA, we now test the video BIOS
+	;Otherwise, we will rely on a video BIOS to set up int 0x10 properly.
+	;Both Generic XT BIOS and IBM BIOS revector int 10h to a dummy return
+	;if switch settings say "no video present". Presumably, this is to prevent
+	;talking to nonexistent hardware.
+	;Update equipement word here
+	;Should PIC and Int vectors have been placed by now?
 	
 video_BIOS_init:
+	;Go from 0xC000:0000 to 0xC800:0000 in 2KB increments looking for video
+	;option ROMs.
 	;call near rom_chksum
-	mov ax, 0xC000
-	mov ds, ax
+	;mov ax, 0xC000
+	;mov ds, ax
 	;mov ax, word [0]
 	;cmp ax, 0xAA55
 	;jne .no_video_ROM
@@ -410,8 +519,8 @@ video_BIOS_init:
 	;xor si, si
 	;call near rom_chksum ;verify checksum
 	;jnz .bad_video_ROM
-	call far [ds:3] ;Jump into option ROM and wait for return
-	jmp .done
+	;call far [ds:3] ;Jump into option ROM and wait for return
+	;jmp .done
 	
 .bad_video_ROM:	
 	
@@ -448,15 +557,15 @@ mem_chk:
 .chk_next:
 	lodsw
 	cmp bx, ax ;Check that pattern read was correct
-	loope .chk_next 
-	test cx, 0xFFFF ;If CX is nonzero
-	jne .find_bad_bits
-	
+	loope .chk_next ;Does LOOPE decrement CX first or check status first?
+	jcxz .no_bad_bits
 .find_bad_bits:
+	;XOR word read with expected to get bad bits
+.no_bad_bits:
+	;Check parity input to see if status was triggered.
+	retn
 
-
-;Assumes: DS: set to segment to check
-;SI: Offset to start checking
+;Inputs: DS:SI- set to segment:offset to check
 ;CX- number of bytes to check
 ;Return- AH=Sum of all bytes. ZF=1, no error.
 rom_chksum:
@@ -467,29 +576,65 @@ rom_chksum:
 	loop .next_byte
 	retn
 	;mov 
+
+;Assumes: Output is blanked
+;Code segment points to 0xF000 (%define DANGEROUS_ASSUMPTION)
+;Input- SI- Offset where to find CRTC params (relative to 0xF000
+;DX- CRTC base address
+;Trashes- AX, BX, CX
+
+;extern unsigned char crt_params[16];
+;unsigned int crt_base;
+;for(i = 0; i < 16; i++)
+;{
+;	OUT(crt_base + idx, i);
+;	OUT(crt_base + data,  crt_params[i]);
+;}
+
+init_crt:
+	xor cx, cx
+.next_byte:
+	mov al, cl
+	out dx, al ;CRTC base address gives the index
+	inc dx ;CRTC base address + 1= CRT data port
+;%warning 'Using CS segment override in BIOS- assuming hardcoded start segment'
+	cs lodsb ;Grab byte (delay should be sufficient)
+	out dx, al
+	dec dx ;get the base address back
+	inc cx ;increment the index
+	cmp cl, 16
+	jb .next_byte
+	retn
 	
+;Input- BX- Data area offset (word) to capture
+;Return AX- Word from data area
+get_data_area:
+	push ds
+	mov ax, 0x40
+	mov ds, ax
+	mov ax, [bx]
+	pop ds
+	retn
+	
+;mask_data_area:
 
-
-NMI_entry
+fixed_entry(0xFE2C3, NMI)      ;NMI Entry Point
 	post_err 3
 	
-HDDparam_entry
+ibm_entry 0xFE401, HDDparam_entry ;HDD Parameter Table
 	db 0
-int19h_entry
-cfgdata_entry
-baud_entry
-int14h_entry
-int16h_entry
-int09h_entry
-int13h_entry
-	mov bl, ah
-	xor bh, bh
 	
-
-int0eh_entry
-FDCparam_entry
-int17h_entry
-int10h_entry
+ibm_entry 0xFE6F2, int19h_entry   ;INT 19 Entry Point
+ibm_entry 0xFE6F5, cfgdata_entry  ;Configuration Data Table
+ibm_entry 0xFE729, baud_entry     ;Baud Rate Generator Table
+ibm_entry 0xFE739, int14h_entry   ;INT 14 Entry Point
+ibm_entry 0xFE82E, int16h_entry   ;INT 16 Entry Point
+ibm_entry 0xFE987, int09h_entry   ;INT 09 Entry Point
+ibm_entry 0xFEC59, int13h_entry   ;INT 13 Floppy Entry Point
+ibm_entry 0xFEF57, int0eh_entry   ;INT 0E Entry Point
+ibm_entry 0xFEFC7, FDCparam_entry ;Floppy Disk Controller Parameter Table
+ibm_entry 0xFEFD2, int17h_entry   ;INT 17
+ibm_entry 0xFF065, int10h_entry   ;INT Video
 	;cmp ah, 
 	jg .bad_id
 	mov bl, ah
@@ -503,7 +648,7 @@ int10h_entry
 jump_table int10h, sub, 16
 ;There isn't much space between here and int1dh_entry...
 	
-int1dh_entry
+ibm_entry 0xFF0A4, int1dh_entry   ;MDA and CGA Video Parameter Table INT 1D
 ;Table entries include:
 ;Htotal, Hdisplayed, Hsync_pos, Hsync_width, Vtotal, Vtotal_adjust
 ;Vdisplayed, Vsync_pos, Interlace, Maxsl, Cursor_star, Cursor_end
@@ -571,25 +716,64 @@ int10h_sub15:
 
 
 
+ibm_entry 0xFF841, int12h_entry   ;INT 12 Entry Point
+	push bx
+	mov bx, BDA(memsize)
+	call near get_data_area
+	pop bx
+	iret
+	
+;Old version
+	;push ds
+	;mov ax, 0x40
+	;mov ds, ax
+	;mov ax, [BDA(memsize)]
+	;pop ds
+	;iret
 
-int12h_entry
-int11h_entry
-int15h_entry
+ibm_entry 0xFF84D, int11h_entry   ;INT 11 Entry Point
+	push bx
+	mov bx, BDA(equipword)
+	call near get_data_area
+	pop bx
+	iret
 
-gfxchar_entry
+;Old version
+	;push ds
+	;mov ax, 0x40
+	;mov ds, ax
+	;mov ax, [BDA(equipword)]
+	;pop ds
+	;iret
+	
+	
+
+ibm_entry 0xFF859, int15h_entry   ;INT 15 Entry Point
+ibm_entry 0xFFA6E, gfxchar_entry  ;Low 128 character of graphic video font
+
+
+
+
 %ifdef GFX_ROM
 	%incbin GFX_ROM
 %endif
 
-int1ah_entry
-int08h_entry
-dummyint_entry
+ibm_entry 0xFFE6E, int1ah_entry   ;INT 1A Entry Point
+ibm_entry 0xFFEA5, int08h_entry   ;INT 08 Entry Point
+
+define_int_table
+
+dummyeoi_entry:	
+	jmp dummyint_entry
+ibm_entry 0xFFF53, dummyint_entry ;Dummy Interrupt Handler
 	iret
 
-int05h_entry
-
-reset_entry
+ibm_entry 0xFFF54, int05h_entry   ;INT 05 Print Screen Entry Point
+ibm_entry 0xFFFF0, reset_entry    ;Power-On Entry Point
 ;jmp far 0xF000:E05B
+
+;ibm_entry 0xFFFF5, ROMdate_entry  ;ROM Date in ASCII “MM/DD/YY” for 8 characters
+;ibm_entry 0xFFFFE, sysmodel_entry ;System Model 0xFC 	
 db `\xEA\x5B\xE0\x00\xF0`, DATE_STAMP, 'CR', 0
 
 
