@@ -217,6 +217,7 @@ endstruc
 %define COM4(_x) COM4_base + COM_8250. %+ _x
 
 ;BDA defintions
+%define BDA_seg 0x40
 struc bios_data_area
 .com1addr resw 1
 .com2addr resw 1
@@ -308,12 +309,26 @@ endstruc
 %define ibm_compat_offset 0xFE000 ;The original BIOS started here
 
 ;Essentially, pad until the entry point is reached. Will error out if exceeded.
-%macro ibm_entry 2
+%macro ibm_entry 1
 	times %1-($-$$)-ibm_compat_offset db 0xFF
-%2:
 %endmacro
 
 %define fixed_entry(_x, _y) ibm_entry _x, _y %+ _entry
+
+;Proc delimiter helpers
+%macro proc 1
+%1:
+	%push %1_ctx
+%endmacro
+
+%macro endproc 0-1
+	%if (%0 == 0)
+		%error 'Must provide the name of the procedure to close.'
+		;%pop
+	%else
+		%pop %1_ctx
+	%endif
+%endmacro
  
 ;Just place the table of interrupt vectors somewhere in the code.
 %macro define_int_table 0
@@ -336,7 +351,9 @@ org ibm_compat_offset ;Where the assembler thinks the code starts relative to CP
 banner:	db '5150-class IBM PC BIOS', crlf
 	db '(c) 2013-15 William D. Jones', crlf, 0x00
 
-fixed_entry(0xFE05B, post)     ;POST Entry Point
+;fixed_entry(0xFE05B, post)     ;POST Entry Point
+ibm_entry 0xFE05B
+proc post_entry
 ;Will need to think this one through.
 ;Simple CMP won't work b/c unused flag positions are undefined.
 ;fl_chk:
@@ -618,23 +635,94 @@ get_data_area:
 	
 ;mask_data_area:
 
-fixed_entry(0xFE2C3, NMI)      ;NMI Entry Point
+ibm_entry 0xFE2C3      ;NMI Entry Point
+proc NMI_entry
 	post_err 3
-	
-ibm_entry 0xFE401, HDDparam_entry ;HDD Parameter Table
+endproc NMI_entry	
+
+
+endproc POST_entry
+
+
+ibm_entry 0xFE401 
+HDDparam_entry: ;HDD Parameter Table
 	db 0
 	
-ibm_entry 0xFE6F2, int19h_entry   ;INT 19 Entry Point
-ibm_entry 0xFE6F5, cfgdata_entry  ;Configuration Data Table
-ibm_entry 0xFE729, baud_entry     ;Baud Rate Generator Table
-ibm_entry 0xFE739, int14h_entry   ;INT 14 Entry Point
-ibm_entry 0xFE82E, int16h_entry   ;INT 16 Entry Point
-ibm_entry 0xFE987, int09h_entry   ;INT 09 Entry Point
-ibm_entry 0xFEC59, int13h_entry   ;INT 13 Floppy Entry Point
-ibm_entry 0xFEF57, int0eh_entry   ;INT 0E Entry Point
-ibm_entry 0xFEFC7, FDCparam_entry ;Floppy Disk Controller Parameter Table
-ibm_entry 0xFEFD2, int17h_entry   ;INT 17
-ibm_entry 0xFF065, int10h_entry   ;INT Video
+
+ibm_entry 0xFE6F2 
+proc int19h_entry   ;INT 19 Entry Point
+
+endproc int19h_entry
+
+
+ibm_entry 0xFE6F5 
+proc cfgdata_entry  ;Configuration Data Table
+
+endproc cfgdata_entry
+
+
+ibm_entry 0xFE729 
+proc baud_entry     ;Baud Rate Generator Table
+
+endproc baud_entry
+
+
+ibm_entry 0xFE739 
+proc int14h_entry   ;INT 14 Entry Point
+
+endproc int14h_entry
+
+
+ibm_entry 0xFE82E 
+proc int16h_entry   ;INT 16 Entry Point
+
+endproc int16h_entry
+
+
+ibm_entry 0xFE987 
+proc int09h_entry   ;INT 09 Entry Point
+
+endproc int09h_entry
+
+
+ibm_entry 0xFEC59 
+proc int13h_entry   ;INT 13 Floppy Entry Point
+
+endproc int13h_entry
+
+
+ibm_entry 0xFEF57 
+proc int0eh_entry   ;INT 0E Entry Point
+
+endproc int0eh_entry
+
+
+ibm_entry 0xFEFC7 
+FDCparam_entry: ;Floppy Disk Controller Parameter Table
+FDC_params:
+.dsdd_360k_525:
+;instantiate struct? Since params not necessarily accessed in order.
+;CF- 1st specify byte for 765
+;2- 2nd specify byte for 765
+;37- Motor wait (37... something, which resolves to 2 seconds)
+;2- N (512 bytes/sector)
+;8- EOT (Last sector number)
+;0x2A- GPL (Gap Length)
+;0xFF- DTL (according to NEC datasheet, set to 0xFF if N != 0)
+;0x50- Format GPL
+;0xF6- Fill byte for format
+;25- Milliseconds to settle head
+;4- 1/8 second units to wait for motor startup.
+
+
+ibm_entry 0xFEFD2 
+proc int17h_entry   ;INT 17
+
+endproc int17h_entry 
+
+
+ibm_entry 0xFF065 
+proc int10h_entry   ;INT Video
 	;cmp ah, 
 	jg .bad_id
 	mov bl, ah
@@ -644,31 +732,34 @@ ibm_entry 0xFF065, int10h_entry   ;INT Video
 	jmp cx
 .bad_id:
 	iret
+endproc int10h_entry
 	
 jump_table int10h, sub, 16
 ;There isn't much space between here and int1dh_entry...
 	
-ibm_entry 0xFF0A4, int1dh_entry   ;MDA and CGA Video Parameter Table INT 1D
+ibm_entry 0xFF0A4 
+int1dh_entry:   ;MDA and CGA Video Parameter Table INT 1D
+video_params: ;Alias label
 ;Table entries include:
 ;Htotal, Hdisplayed, Hsync_pos, Hsync_width, Vtotal, Vtotal_adjust
 ;Vdisplayed, Vsync_pos, Interlace, Maxsl, Cursor_star, Cursor_end
 ;Start_addr (word), Cursor (word)
-cga_params_4025:
+.cga_4025:
 db 0x38, 0x28, 0x2D, 0x0A, 0x1F, 0x06
 db 0x19, 0x1C, 0x02, 0x07, 0x06, 0x07
 dw 0x0, 0x0
 
-cga_params_8025:
+.cga_8025:
 db 0x71, 0x50, 0x5A, 0x0A, 0x1F, 0x06
 db 0x19, 0x1C, 0x02, 0x07, 0x06, 0x07
 dw 0x0, 0x0
 
-cga_params_gfx:
+.cga_gfx:
 db 0x38, 0x28, 0x2D, 0x0A, 0x7F, 0x06
 db 0x64, 0x70, 0x02, 0x01, 0x06, 0x07
 dw 0x0, 0x0
 
-mda_params:
+.mda:
 db 0x61, 0x50, 0x52, 0x0F, 0x19, 0x06
 db 0x19, 0x19, 0x02, 0x0D, 0x0B, 0x0C
 dw 0x0, 0x0
@@ -716,12 +807,14 @@ int10h_sub15:
 
 
 
-ibm_entry 0xFF841, int12h_entry   ;INT 12 Entry Point
+ibm_entry 0xFF841
+proc int12h_entry   ;INT 12 Entry Point
 	push bx
 	mov bx, BDA(memsize)
 	call near get_data_area
 	pop bx
 	iret
+endproc	int12h_entry
 	
 ;Old version
 	;push ds
@@ -731,13 +824,15 @@ ibm_entry 0xFF841, int12h_entry   ;INT 12 Entry Point
 	;pop ds
 	;iret
 
-ibm_entry 0xFF84D, int11h_entry   ;INT 11 Entry Point
+ibm_entry 0xFF84D
+proc int11h_entry   ;INT 11 Entry Point
 	push bx
 	mov bx, BDA(equipword)
 	call near get_data_area
 	pop bx
 	iret
-
+endproc int11h_entry
+	
 ;Old version
 	;push ds
 	;mov ax, 0x40
@@ -748,28 +843,43 @@ ibm_entry 0xFF84D, int11h_entry   ;INT 11 Entry Point
 	
 	
 
-ibm_entry 0xFF859, int15h_entry   ;INT 15 Entry Point
-ibm_entry 0xFFA6E, gfxchar_entry  ;Low 128 character of graphic video font
+ibm_entry 0xFF859 
+proc int15h_entry   ;INT 15 Entry Point
 
+endproc int15h_entry
 
-
-
+ibm_entry 0xFFA6E 
+gfxchar_entry:  ;Low 128 character of graphic video font
 %ifdef GFX_ROM
 	%incbin GFX_ROM
 %endif
 
-ibm_entry 0xFFE6E, int1ah_entry   ;INT 1A Entry Point
-ibm_entry 0xFFEA5, int08h_entry   ;INT 08 Entry Point
+ibm_entry 0xFFE6E 
+proc int1ah_entry   ;INT 1A Entry Point
+
+endproc int1ah_entry
+
+ibm_entry 0xFFEA5 
+proc int08h_entry   ;INT 08 Entry Point
+
+endproc int08h_entry
 
 define_int_table
 
 dummyeoi_entry:	
 	jmp dummyint_entry
-ibm_entry 0xFFF53, dummyint_entry ;Dummy Interrupt Handler
+ibm_entry 0xFFF53
+proc dummyint_entry ;Dummy Interrupt Handler
 	iret
+endproc dummyint_entry
 
-ibm_entry 0xFFF54, int05h_entry   ;INT 05 Print Screen Entry Point
-ibm_entry 0xFFFF0, reset_entry    ;Power-On Entry Point
+ibm_entry 0xFFF54
+proc int05h_entry   ;INT 05 Print Screen Entry Point
+
+endproc int05h_entry 
+
+ibm_entry 0xFFFF0 
+reset_entry:    ;Power-On Entry Point
 ;jmp far 0xF000:E05B
 
 ;ibm_entry 0xFFFF5, ROMdate_entry  ;ROM Date in ASCII “MM/DD/YY” for 8 characters
