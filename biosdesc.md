@@ -207,8 +207,23 @@ TODO: Add other locations, and mark where each location was introduced and from 
 
 The BIOS uses 256 bytes from linear address 0x00400 to 0x004FF to store its parameters and data. The following locations are used in the IBM PC 5150 BIOS as described by the IBM 5150 Technical Reference Manual.
 
-###Equipment Word
-The Equipment Word consists of two bytes at 0x40:0x10. According to "System BIOS for IBM PC/XT/AT Computers and Compatibles", it consists of the following fields:
+###COM/LPT Base Addresses, Equipment Word, Memory Size
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x00400|COM 1 address|2|
+|0x00402|COM 2 address|2|
+|0x00404|COM 3 address|2|
+|0x00406|COM 4 address|2|
+|0x00408|LPT 1 address|2|
+|0x0040A|LPT 2 address|2|
+|0x0040C|LPT 3 address|2|
+|0x0040E|LPT 4 address|2|
+|0x00410|Equipment word|2|
+|0x00412|Manufacturing test|1|
+|0x00413|Total memory size|2|
+|0x00415|I/O channel memory size|2|
+
+* According to "System BIOS for IBM PC/XT/AT Computers and Compatibles", the equipment word consists of the following fields:
 
 |Bits|Function|
 |----|:--------|
@@ -216,12 +231,106 @@ The Equipment Word consists of two bytes at 0x40:0x10. According to "System BIOS
 |13-12| Reserved|
 |11-9| Number of COM ports|
 |8| Reserved|
-|7-6| Numbr of disk drives|
+|7-6| Number of disk drives|
 |5-4| Other (0)/40x25 CGA (1)/80x25 CGA (2)/Monochrome (3) video mode|
 |3| Reserved|
 |2| Pointing device|
 |1| Coprocessor installed|
 |0| Diskette boot enabled|
+
+* The Manufacturing test flag can be used to input a program into the PC using a microcontroller attached to the keyboard port. At least one person uses this to create an XT server.
+* Memory sizes are in kB.
+
+###Keyboard
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x00417|Keyboard status|2|
+|0x00419|Keypad entry|1|
+|0x0041A|Keyboard buffer head|2|
+|0x0041C|Keyboard buffer tail|2|
+|0x0041E|Keyboard ring buffer|2*16|
+
+* The Keyboard status word is accessed as two bytes.
+* If head == tail in the ring buffer, the buffer is empty. Because of this, only 15 words are usable. Each buffer entry stores the ASCII equivalent of the scancode, and then the scancode itself.
+
+###Floppy
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x0043E|Seek status|1|
+|0x0043F|Motor status|1|
+|0x00440|Motor count|1|
+|0x00441|Disk status|1|
+|0x00442|NEC controller status|1*7|
+
+* Seek status- The BIOS uses the top 4 bits for internal housekeeping.
+* Motor count is the count in system ticks before floppy motor shuts off.
+* 765 FDC returns up to 7 bytes as status of command execution.
+
+###Video
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x00449|CRT mode|1|
+|0x0044A|CRTC number columns|2|
+|0x0044C|Video card buffer size|2|
+|0x0044E|Video card buffer start|2|
+|0x00450|Cursor position|2*8|
+|0x00460|Cursor mode|2|
+|0x00462|Active page|1|
+|0x00463|CRTC address|2|
+|0x00465|Video card mode register mirror|1|
+|0x00466|CRT palette|1|
+
+###Casette
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x00467|Casette edge count|2|
+|0x00469|Casette CRC register mirror|1|
+|0x0046B|Casette last input value|1|
+
+###Timer
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x0046C|Timer count|4|
+|0x00470|24-hour overflow for timer|1|
+
+* The timer count is accessed as two words in 5150 BIOS.
+
+
+###System
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x00471|Break flag|1|
+|0x00472|Reset flag|2|
+
+* The reset flag is given the value 0x1234 to tell the BIOS to do a warm reset.
+
+###Fixed disk
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x00474|Fixed disk data area|4|
+
+* In 5150/5160 systems and respective clones, the hard disk controller is expected to provide int 0x13 subroutines. Like on 5170 systems and clones, however, the register set is possibly standardized.
+
+###LPT/COM Timeouts
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x00478|LPT 1 timeout|1|
+|0x00479|LPT 2 timeout|1|
+|0x0047A|LPT 3 timeout|1|
+|0x0047B|LPT 4 timeout|1|
+|0x0047C|COM 1 timeout|1|
+|0x0047D|COM 2 timeout|1|
+|0x0047E|COM 3 timeout|1|
+|0x0047F|COM 4 timeout|1|
+
+###Extra Keyboard Data
+|Address (Linear)|Function|Size (Bytes)|
+|----|:---|---|
+|0x00480|Keyboard ring buffer start|2|
+|0x00482|Keyboard ring buffer end|2|
+
+* The above variables describe the beginning and end addresses for the keyboard ring buffer. This is in contrast to the current head and tail.
+
 
 ##Entry Point Table
 IBM BIOSes, including clones, tend to reserve specific addresses as entry points into its interrupt service routines. The following is a list of such entry points that should be kept for compatibility with software which jumps directly into BIOS. This includes certain Option ROMs and early-PC software which thought it was a good idea to bypass the ```INT``` instruction to save a few cycles.

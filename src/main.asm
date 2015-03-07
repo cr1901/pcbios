@@ -125,6 +125,10 @@ endstruc
 
 %define NMI_gate 0xA0
 
+%define GAME_port1 0x201
+
+;pre-CMOS RTC defines go here
+
 %define MDA_base 0x3B4
 struc MDA_reg
 .idx6845 resb 1
@@ -264,7 +268,7 @@ struc bios_data_area
 .dayelapsed resb 1
 ;System params
 .breakflag resb 1
-.resetflag resw 1
+.resetflag resw 1 ;0x1234 for warm reset.
 ;Fixed disk data area
 resw 2
 ;Timeouts
@@ -304,6 +308,9 @@ endstruc
 ;org 0x400
 ;resb bios_data_area_size
 
+;ROM BIOS data structure defines
+;Floppy parameter table format struc goes here
+
 
 ;Entry point management defines
 %define ibm_compat_offset 0xFE000 ;The original BIOS started here
@@ -313,9 +320,10 @@ endstruc
 	times %1-($-$$)-ibm_compat_offset db 0xFF
 %endmacro
 
-%define fixed_entry(_x, _y) ibm_entry _x, _y %+ _entry
 
-;Proc delimiter helpers
+;Proc delimiter helpers- these are mainly used as delimiters, but may help
+;catch errors. endproc will error out if wrong NASM context/procedure name
+;is given.
 %macro proc 1
 %1:
 	%push %1_ctx
@@ -489,19 +497,20 @@ set_stack:
 ;about attached video.
 ppi_init:
 	mov al, 0x99
-	out PPI(ctrl), al ;Port A/C Input. Port B Output. 
-	;Mode 0 (no handshaking) for all I/O pins.	
+	out PPI(ctrl), al ;Port A/C Input. Port B Output.
+	;Mode 0 (no handshaking) for all I/O pins.
 	
 vid_init:	
 	;If CGA/MDA 6845 CRTCs exist, initialize them now using the tables
 	;provided by INT 0x1D and the switch settings.
-	;in al, PPI(portb)
-	;mov bl, al ;Save a copy
-	;or al, 0x80 ;Enable sense switches
-	;out PPI(portb), al
-	;delay
-	;in al, PPI(porta)
-	;and al, 30 ;Get the video switches
+	in al, PPI(portb)
+	mov bl, al ;Save a copy
+	or al, 0x80 ;Enable sense switches
+	out PPI(portb), al
+	delay
+	in al, PPI(porta)
+	and al, 30 ;Get the video switches
+	jz video_BIOS_init
 	
 .test_exist_CGA:
 
@@ -585,13 +594,14 @@ mem_chk:
 ;Inputs: DS:SI- set to segment:offset to check
 ;CX- number of bytes to check
 ;Return- AH=Sum of all bytes. ZF=1, no error.
-rom_chksum:
+proc rom_chksum
 	xor ax, ax
 .next_byte:
 	lodsb
 	add ah, al
 	loop .next_byte
 	retn
+endproc rom_chksum
 	;mov 
 
 ;Assumes: Output is blanked
@@ -632,8 +642,18 @@ get_data_area:
 	mov ax, [bx]
 	pop ds
 	retn
-	
+
+set_data_area_8:
+	push dx
+	push ds
+	mov dx, 0x40
+	mov ds, dx
+	mov [bx], al
+	pop ds
+	pop dx
+	retn
 ;mask_data_area:
+
 
 ibm_entry 0xFE2C3      ;NMI Entry Point
 proc NMI_entry
@@ -688,12 +708,26 @@ endproc int09h_entry
 ibm_entry 0xFEC59 
 proc int13h_entry   ;INT 13 Floppy Entry Point
 
+
+
 endproc int13h_entry
 
 
+;I managed to basically create the SAME EXACT code as IBM without even looking...
+;Some of these routines have one obvious solution...
 ibm_entry 0xFEF57 
 proc int0eh_entry   ;INT 0E Entry Point
-
+	sti ;Enable (higher-level) interrupts
+	push ax
+	push ds
+	mov ax, 0x40
+	mov ds, ax
+	or byte [BDA(seekstatus)], 0x80 ;Set interrupt rcvd flag
+	mov al, 0x20 ;Send Nonspecific EOI
+	out PIC(ocw1), al 
+	pop ds
+	pop ax
+	iret
 endproc int0eh_entry
 
 
@@ -864,6 +898,8 @@ proc int08h_entry   ;INT 08 Entry Point
 
 endproc int08h_entry
 
+;Not mandatory entry point
+ibm_entry 0xFFEF3
 define_int_table
 
 dummyeoi_entry:	
