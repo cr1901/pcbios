@@ -40,9 +40,16 @@ The IBM PC CPU is an Intel 8088 processor running in maximum mode. Consequently,
 When the IBM PC was designed, requests for DMA were exposed to expansion cards via pins on the ISA bus. The designers decided that hardware should make requests for DMA using an active high signal, and that the DMA controller should acknowledge DMA requests using an active low signal. Normal (uncompressed) timing is used, and mem-to-mem is disabled.
 
 ###8253 PIT
-Channel 0 of the PIT attaches to the highest-priority interrupt- IR0- of the PIC. A square wave is emitted from channel 0, though a pulse should work just as well in practice (PIC is edge-triggered).
+Channel 0 of the PIT attaches to the highest-priority interrupt- IR0- of the PIC. This consequently means that the system timer ISR is INT 0x08 (see next section). A square wave (PIT mode 3) is emitted from channel 0, though a pulse (PIT mode 2) should work just as well in practice (PIC is edge-triggered).
 Channel 1 feeds into an inverter, which in turn feeds into DREQ0 of the DMAC. A pulse is emitted from channel 1 (PIT mode 2).
-Channel 2 attaches to the speaker gate, and emits a square wave.
+Channel 2 attaches to the speaker gate, and emits a square wave (PIT mode 3).
+
+###8259 PIC
+The PIC reserves interrupts 0x08-0x0F of the 8088 for external hardware events. This from what I can tell, is a design mistake; the 8086 Family User's Manual explicitly states that interrupts 0x0-0x1F are reserved for Intel's use. They were used in the 286 and above for what would become protected mode. This causes some pain in 5170/AT-clones and above, as the PIC's base address must be relocated.
+
+The PIC's input pins that hardware use to request attention are called Interrupt Requests (IRs). The "IRQ" abbreviation seems to be specific to software descriptions of the interrupt system ([discussion](http://www.vintage-computer.com/vcforum/showthread.php?45214-8259-End-of-Interrupt-Behavior&p=347031#post347031)). The designers of the PC decided to make the ISA bus edge-triggered (low-to-high).
+
+Default interrupts, as described in the PIC datasheet, are also known as "spurious interrupts".
 
 ###DMA Page Registers
 The 8237 DMA Controller only has enough address lines for a 64kB system. The DMA page registers provide the remaining 4 address bits in an IBM PC system, one for each channel except channel 0. DMA channel 0 handles DRAM Refresh by assertion of 8253 PIT's channel 1 output (see BIOS description for more detail). Consequently, mem-to-mem xfers are not useful. The page register itself is a TTL 4x4 register file.
@@ -250,7 +257,25 @@ The BIOS uses 256 bytes from linear address 0x00400 to 0x004FF to store its para
 |0x0041C|Keyboard buffer tail|2|
 |0x0041E|Keyboard ring buffer|2*16|
 
-* The Keyboard status word is accessed as two bytes.
+* The Keyboard status word is accessed as two bytes. The meaning of each bit is as follows. The 3 LSB do not appear to have meaning in the 5150:
+
+|Bits|Function|
+|----|:--------|
+|15|Insert state is inactive (0)/active (1)|
+|14|Caps lock state is inactive (0)/active (1)|
+|13|Num lock state is inactive (0)/active (1)|
+|12|Scroll lock state is inactive (0)/active (1)|
+|11|Alt key is not depressed (0)/depressed (1)|
+|10|Ctrl key is not depressed (0)/depressed (1)|
+|9|Left shift key is not depressed (0)/depressed (1)|
+|8|Right shift key is not depressed (0)/depressed (1)|
+|7|Insert key is not depressed (0)/depressed (1)|
+|6|Caps lock key is not depressed (0)/depressed (1)|
+|5|Num lock key is not depressed (0)/depressed (1)|
+|4|Scroll lock key is not depressed (0)/depressed (1)| 
+|3|Hold state is inactive(0)/active (1)|
+
+* TODO: Discuss keyboard key mappings to states (i.e. Hold state triggered by Pause/Break key) and keypad entry.
 * If head == tail in the ring buffer, the buffer is empty. Because of this, only 15 words are usable. Each buffer entry stores the ASCII equivalent of the scancode, and then the scancode itself.
 
 ###Floppy
@@ -262,8 +287,23 @@ The BIOS uses 256 bytes from linear address 0x00400 to 0x004FF to store its para
 |0x00441|Disk status|1|
 |0x00442|NEC controller status|1*7|
 
-* Seek status- The BIOS uses the top 4 bits for internal housekeeping.
+* Seek status bits 0-3 represent whether drives 0-3 require calibration on the next seek command. A 0 for the corresponding drive bit indicates that recalibration is required. The BIOS uses the top 4 bits for internal housekeeping. In the 5150 BIOS, only the MSB bit is used. **The MSB indicates that IR 6, which connects to the floppy drive, has been serviced. It is up to INT 0x0E (8 + 6 = 0x0E) to set the MSB of 0x0043E.**
+* Motor status bits 0-3 represent whether drives 0-3's motors are running. Bit 7 is used to indicate that the current 765 command to be sent is a write, and that a delay for motor spin-up is required before sending the command.
+* TODO: Discuss floppy cable twists and how they prevent multiple motors from running simultaneously.
 * Motor count is the count in system ticks before floppy motor shuts off.
+* The meaning of various bits in the Disk status byte is as follows (0 represents no errors):
+
+|Bits|Function|
+|----|:--------|
+|7|Timeout for diskette operation|
+|6|Seek error|
+|5|Controller failure|
+|4|CRC error from diskette read|
+|3|Dma overrun (1)/DMA 64kb Boundary exceeded (1 **and** Bit 0 == 1)|
+|2|Record not found|
+|0-1|Invalid 765 command (1)/Bad address mark (2)/Write protected disk (3)|
+* Many conditions cause "Controller failure to be returned". See BIOS description.
+* TODO: Figure out why it's called DMA "overrun".
 * 765 FDC returns up to 7 bytes as status of command execution.
 
 ###Video
@@ -354,7 +394,7 @@ Sources:
 |0xFEF57|INT 0E Entry Point|
 |0xFEFC7|FDC Parameter Table|
 |0xFEFD2|INT 17 Entry Point|
-|0xFF065|INT Video|
+|0xFF065|INT 10 Entry Point|
 |0xFF0A4|INT 1D Video Parameter Table|
 |0xFF841|INT 12 Entry Point|
 |0xFF84D|INT 11 Entry Point|
@@ -478,8 +518,8 @@ This subroutine is actually placed before the BIOS Entry Point but after banner.
 ###Pre-DMA Refresh Tests
 * Disable DMA controller
 * PIT input frequency is 0x1234DD = 1193181 Hz.
-* Test Channel 1 of PIT by waiting for a single tick (?). Halt if takes too long.
-* Test Channel 1 of PIT by waiting for a single period (cnt wraps to 0). Halt if takes too long.
+* Test Channel 1 of PIT by waiting for a single tick (?). Halt if takes too long (use software-timed loop).
+* Test Channel 1 of PIT by waiting for a single period (cnt wraps to 0). Halt if takes too long (use software-timed loop).
 * Set up Channel 1 divisor for DMA refresh (0x1234DD/18- around 66KHz, or at least 128 rows every 2 ms: 1/128 * (1/500) = 64kHz).
 * For DRAM rows, the convention is 2^n * (128) rows every 2^(n + 1) ms, where n >= 0.
  * A 64kb chunk of memory accesses every second is sufficient, since rows get refreshed repeatedly as the address increments. A memory access to 0x0000 and 0x0100, for instance, refresh the same row for 128-row RAM. A memory access to 0x0000 and 0x0200 refresh the same row for 256-row RAM. Rinse and repeat.
