@@ -36,6 +36,17 @@ To expand later.
 
 The IBM PC CPU is an Intel 8088 processor running in maximum mode. Consequently, the 8259 PIC (multiplexes interrupt sources for the single INT input) and 8237 DMAC are supported. The sources for NMI include parity error, handled using TTL glue logic and a TTL parity generator, and I/O channel check from the ISA bus. The address and data buses are buffered using TTL chips.
 
+###DRAM
+To expand later.
+
+The IBM PC uses 41xx series DRAM. 16kB-64kB boards use either 4116 or 4164 DRAM chips, while the 64kB-256kB boards use either 4164 or 41256 DRAM chips. A 41256 DRAM chip can be used in place of a 4164 DRAM chip; 4116 chips require a -5V rail for proper operation of its transistors.
+
+The DRAM has rudimentary error detection using the 74LS280 9-bit parity generator. The 74LS280 counts the number of set (1) bits on the 8-bit data bus. During a write, the 9th bit input to the 74LS280 is forced to zero by a gate, thereby having no effect on the output of the parity generator. The *even* parity output of the input data becomes the 9th bit written to DRAM; since the *even* parity output will be set if the data bus has an even number of bits set, the IBM PC consequently implements odd parity. 
+
+During a read, the 9th bit of the 74LS280 reflects the output of the the parity bit of DRAM. Therefore, during a read, the ODD parity output should always be asserted to 1. The good old "PARITY CHECK" error everyone knows and love will occur if the read value has even parity (which implies ODD output is 0).
+
+To figure out: Why is the DRAM circuit's XMEMW inverted, un-inverted, and then run through a resistor? Is the time delay necessary? Also, what's up with all the resistors on bus lines?!
+
 ###8237 DMA Controller
 When the IBM PC was designed, requests for DMA were exposed to expansion cards via pins on the ISA bus. The designers decided that hardware should make requests for DMA using an active high signal, and that the DMA controller should acknowledge DMA requests using an active low signal. Normal (uncompressed) timing is used, and mem-to-mem is disabled.
 
@@ -161,7 +172,7 @@ To be written. The FDC is arguably the most difficult part of the IBM PC to unde
 To be written. See [this document][MDA] for schematic.
 
 ###Game Port
-To be written. See [this document][GP] for schematic.
+The Game Port consists of a single register at port 0x201. The top 4 bits are digital inputs, and the bottom 4 . By writing to the bottom 4 bits, a quad 558 timer outputs a logic 1 pulse to a capacitor whose voltage level based upon the RC time constant. A joypad or attached resistor network provides the resistance. The PC can time the interval between sending the pulse to the time that the lower 4 bits become logic zero to get an analog reading based on resistance. Since the time varies between joypads due to resistor tolerances, devices that use the joypad require calibration for max and min values. See [this document][GP] for schematic.
 [GP]: http://www.minuszerodegrees.net/oa/OA%20-%20IBM%20Game%20Control%20Adapter.pdf
 
 ##Software Workarounds and Incompatibilities

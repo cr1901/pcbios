@@ -6,7 +6,6 @@
 	jmp err_hlt
 %endmacro
 
-
 ;Helper macro for higher-speed boards. Right now it resolves to nothing.
 %if 0 ;TURBO_CLONE_{FIXED, ADJUST}
 	%macro delay 0
@@ -45,11 +44,14 @@
 	%endrep
 %endmacro
 
+
 ;General defines
 %define crlf 0x0D, 0x0A
 %define lin2seg(_x) (_x >> 4) ;Use segments 0x0, 0x1000, 0x2000, etc
 %define lin2off(_x) (_x & 0x0FFFF)
+%xdefine bit(_offset) (1 << _offset)
 %xdefine bit(_x, _offset) _x << _offset
+
 
 ;IO defines
 ;Onboard hardware
@@ -125,7 +127,9 @@ endstruc
 
 %define NMI_gate 0xA0
 
-%define GAME_port1 0x201
+
+;External hardware (including expansion cards)
+%define GAME1_base 0x201
 
 ;pre-CMOS RTC defines go here
 
@@ -197,7 +201,6 @@ resb 1
 endstruc
 %define FDC(_x) FDC_base + FDC_765. %+ _x
 
-;External hardware (including expansion cards)
 %define COM1_base 0x3F8
 %define COM2_base 0x2F8
 %define COM3_base 0x3E8
@@ -219,6 +222,7 @@ endstruc
 %define COM2(_x) COM2_base + COM_8250. %+ _x
 %define COM3(_x) COM3_base + COM_8250. %+ _x
 %define COM4(_x) COM4_base + COM_8250. %+ _x
+
 
 ;BDA defintions
 %define BDA_seg 0x40
@@ -303,6 +307,63 @@ endstruc
 ;2- Pointing device
 ;1- Coprocessor installed
 ;0- Diskette boot enabled
+%define NUM_LPT 0xC000
+%define NUM_COM 0x0E00
+%define NUM_DISK 0x00C0
+%define VIDEO_MODE 0x0030
+%define GOT_MOUSE 0x0004 
+%define GOT_87 0x0002
+%define DISK_BOOT 0x0001
+
+;Keyboard state 1
+;act- active, prs- pressed, tgl- toggled
+%define INS_ACT 0x80
+%define CAPS_TGL 0x40
+%define NUM_TGL 0x20
+%define SCROLL_TGL 0x10
+%define ALT_PRS 0x08
+%define CTRL_PRS 0x04
+%define LSHIFT_PRS 0x02
+%define RSHIFT_PRS 0x01
+
+;Keyboard state 2
+%define INS_PRS 0x80
+%define CAPS_PRS 0x40
+%define NUM_PRS 0x20
+%define SCROLL_PRS 0x10
+%define HOLD_TGL 0x08
+
+;Diskette seek status
+%define DISKINT_RCVD 0x80
+%define DRIVE3_RECAL 0x08
+%define DRIVE2_RECAL 0x04
+%define DRIVE1_RECAL 0x02
+%define DRIVE0_RECAL 0x01
+
+;Motor status
+%define DELAY_REQD 0x80
+%define DRIVE3_MOTOR 0x08
+%define DRIVE2_MOTOR 0x04
+%define DRIVE1_MOTOR 0x02
+%define DRIVE0_MOTOR 0x01
+
+;Diskette status
+%define FD_TIMEOUT 0x80
+%define SEEK_ERR 0x40
+%define FDC_ERR 0x20
+%define CRC_ERR 0x10
+%define DMA_BOUNDARY 0x09
+%define DMA_OVERRUN 0x08
+%define NO_RECORD 0x04
+%define WRITE_PROTECT 0x03
+%define NO_ADDR_MARK 0x02
+%define INVALID_OP 0x01
+
+;Time constants (18.2 Hz)
+%define TICK_HZ 18
+%define TICKS_PER_MIN 1092
+%define TICKS_PER_HOUR 65543
+%define TICKS_PER_DAY 0x1800B0
 
 ;section .bss
 ;org 0x400
@@ -319,7 +380,6 @@ endstruc
 %macro ibm_entry 1
 	times %1-($-$$)-ibm_compat_offset db 0xFF
 %endmacro
-
 
 ;Proc delimiter helpers- these are mainly used as delimiters, but may help
 ;catch errors. endproc will error out if wrong NASM context/procedure name
@@ -350,6 +410,7 @@ int_table:
 	dw dummyint_entry, int19h_entry, int1ah_entry, dummyint_entry ;18
 	dw dummyint_entry, int1dh_entry, dummyint_entry, dummyint_entry ;1C
 %endmacro
+
 
 ;BIOS code begins here
 section .text ;Not necessary, but this is where the real code starts
@@ -723,7 +784,7 @@ proc int0eh_entry   ;INT 0E Entry Point
 	mov ax, 0x40
 	mov ds, ax
 	or byte [BDA(seekstatus)], 0x80 ;Set interrupt rcvd flag
-	mov al, 0x20 ;Send Nonspecific EOI
+	mov al, 0x20 ;Send Nonspecific EOI- enable lower-level interrupts
 	out PIC(ocw1), al 
 	pop ds
 	pop ax
