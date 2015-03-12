@@ -87,7 +87,7 @@ The PPI is replaced with an 8042 in AT-systems and above, which provides an inte
 |PA6-7|Number of floppy disk drives (1-4)|PB7 == 1|
 |PB0|Timer channel 2 gate disable (0)/enable (1)|N/A|
 |PB1|PC speaker data disable (0)/enable (1)|N/A|
-|PB2|Read I/O channel memory size (0)/512kB bias (1)|N/A|
+|PB2|Read 512kB bias (0)/I/O channel memory size (1)|N/A|
 |PB3|Casette motor off (1)/on (0)|N/A|
 |PB4|Enable (0)/disable (1) RAM parity check gate|N/A|
 |PB5|Enable (0)/disable (1) I/O channel check gate|N/A|
@@ -154,7 +154,7 @@ Expansion cards are likely to provide the following hardware (*that BIOS is like
 
 Most hardware is exposed through x86 port-mapped I/O ports. Memory-mapped I/O is reserved for BIOS ROM chips, extra memory and the frame buffer.
 
-The minimum external hardware configuration so that the BIOS doesn't complain (at least IBM's) appears to be Floppy and Video Card.
+The minimum external hardware configuration so that the BIOS doesn't complain (at least IBM's) appears to be floppy and keyboard.
 
 The following sections describe programming and hardware considerations for expansion cards. The topics discussed here all have circuit schematics, from which most of this information is derived. Most of these expansion cards use TTL latches/registers to implement I/O ports, which feed into/out of other parts of the expansion card circuitry. These latches can (and do) affect operation of other main control logic components, such as the CRT Controller's input clock speed being determined by the CGA mode control register. These are interactions between hardware components (beyond address decoding) that cannot necessarily be inferred *just* from the datasheets for the relevant hardware and TTL chips.
 ###MDA Card
@@ -534,26 +534,61 @@ This subroutine is actually placed before the BIOS Entry Point but after banner.
 * Set up Channel 1 divisor for DMA refresh (0x1234DD/18- around 66KHz, or at least 128 rows every 2 ms: 1/128 * (1/500) = 64kHz).
 * For DRAM rows, the convention is 2^n * (128) rows every 2^(n + 1) ms, where n >= 0.
  * A 64kb chunk of memory accesses every second is sufficient, since rows get refreshed repeatedly as the address increments. A memory access to 0x0000 and 0x0100, for instance, refresh the same row for 128-row RAM. A memory access to 0x0000 and 0x0200 refresh the same row for 256-row RAM. Rinse and repeat.
-* Test Address and Count Registers of DMA controller by writing and reading a pattern back (0xFF, 0x00). Halt on error.
+* Test Address and Count Registers of DMA controller by writing and reading a pattern back (0xFF, 0x00). Halt on error. Push AX seems to be used to cause a delay without regard to RAM contents :P.
 
 ###Init DMA Refresh
 * Set up DMA Cannel 0 for single, read xfer, autoinit, incrementing, and 64kB chunk (0x58) (65536 is to support various DRAM row counts).
 * Enable DMA controller (0x00 to command register) and enable channel 0.
 * Set up DMA channels 1 to 3 to a known state (single, verify xfer, no autoinit, incrementing). 
- * The 8237 datasheet recommends this in case bad things (TM) happen.
+* The 8237 datasheet recommends this in case bad things (TM) happen.
 
 ###First 16k Check
 * Set DS/ES to 0 (in this case, MOV ES, BX/MOV DS, BX works b/c BX held 0 previously)
 * Enable expansion box (write 0x01 to 0x213).
-* Check Data Area for whether this is a warm reset or not (0x1234).
+* Check Data Area (0x00472) for whether this is a warm reset or not (0x1234). If so, skip the RAM test and go to "Get RAM Size".
 * Jump to Storage Test Subroutine. Halt on error.
 
-###Get RAM Size
+###Get RAM Size/Zero Fill
 ```
 517 CLD ;Needed?
 ```
 * Read sense switches (PORT_A) to determine the number of banks of RAM on the motherboard.
-* Zero out this RAM. Ensure reset flag in Data Area is preserved. This does not work quite as intended on 64k/256k boards due to assuming 16kB RAM chips. IBM says that these switches should both be off on 64k/256k boards.
+* Zero out this RAM. Ensure reset flag in Data Area is preserved prior to zeroing RAM. This step does not work quite as intended on 64k/256k boards due to BIOS assuming the switches give the mainboard RAM in 16kB units. 1984 IBM Tech Ref says that these switches should both be off on 64k/256k boards as a workaround.
+* For the I/O channel, read PORT_C (first the 512kB bias, then the 32kB units) to determine the I/O channel RAM size. Store this value into the Data Area at 0x00415. Zero out all remaining RAM.
+* If all 5 switches are asserted, the PC will test 1MB of RAM (which *wont* exist). The highest safe value is, from SW5-1: OFF, ON, ON, OFF, ON, which is 576kB of I/O channel RAM. 16k-64k board BIOSes only test the first 4 switches, which limits the tested RAM to 480+64=544k.
+* Due to the bug mentioned above, the I/O channel RAM value is a bit of a misnomer on 64k/256k boards. On these boards, 192kB (256-64 kB) of the mainboard RAM is treated as I/O channel RAM, as if an ISA card provided this RAM. In reality, most ISA cards with memory provide up to 384kB (256+384=640).
+
+###8259 Init
+* Perform the initialization steps for the 8259:
+* ICW1: Edge-triggered, Single 8259, ICW4 needed
+* ICW2: Base address of 0x08
+* ICW4: Buffered, 8086 Mode
+* Point ES to 0.
+
+###Init Stack
+* Set stack SS:SP to 0x0030:0x0080
+
+###Manufacturing Test
+* If Data Area indicates a warm reset, skip this section.
+* Otherwise, set up int 0x09 (keyboard interrupt) to point to a temporary ISR (```D11```), reset the keyboard, and read the return code.
+* If the return code is 0x65, this indicates Manufacturing Test 2, according to IBM's terminology. Read 255 bytes from the keyboard port (```SP_TEST```), and then invoke int 0x3E.
+
+```
+SP_TEST:
+```
+To be written.
+
+###Initial Interrupt Vector Setup.
+* Fill the first 32 interrupt vectors to point to a temporary ISR (```D11```).
+* Then, set the NMI (int 0x02), Print Screen (int 0x05), interrupts to their true values. ROM BASIC's segment (0xF600) should also be placed into the Interrupt Vector Table (IVT) at this time.
+
+```
+D11:
+```
+This temporary ISR sets a flag in AX which indicates an interrupt occurred, masks all interrupts, and then sends a nonspecific EOI to the PIC. In IBM's implementation, the ```IRET``` instruction at the end of ```D11``` is a fixed entry point in clones at 0xFFF53. I'm not sure if the entry point of ```D11```, 0xFFF47, is significant in any way.
+
+###8259 Test
+* Test to see that 
 
 
 6845 CRT Controller parameters are stored in the following order:
